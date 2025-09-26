@@ -330,7 +330,7 @@ const PaymentSuccess = () => {
                 <span>₹{orderDetails.subtotal?.toFixed(2)}</span>
               </div>
               <div className="flex justify-between text-gray-600">
-                <span>GST (18%)</span>
+                <span>GST (5%)</span>
                 <span>₹{(orderDetails.gstAmount || orderDetails.tax || 0).toFixed(2)}</span>
               </div>
               {orderDetails.discountAmount > 0 && (

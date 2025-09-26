@@ -53,3 +53,13 @@ export const updateOrderStatus = async (orderId, status, token, expectedDelivery
     }
   );
 };
+
+export const cancelOrder = async (orderId, token) => {
+  return await axios.put(
+    `http://localhost:3000/api/orders/${orderId}/cancel`,
+    {},
+    {
+      headers: { Authorization: `Bearer ${token}` },
+    }
+  );
+};

@@ -1,7 +1,7 @@
 // pages/Orders.js
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { getOrders, getSellerOrders, updateOrderStatus } from '../api/order';
+import { getOrders, getSellerOrders, updateOrderStatus, cancelOrder } from '../api/order';
 import { useLocation, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import BackButton from '../components/BackButton';
@@ -36,13 +36,13 @@ const Orders = () => {
         setLoading(false);
       }
     };
+
     if (user && token) fetchOrders();
   }, [user, token, isSellerRoute]);
 
   const handleGoBack = () => {
     navigate(-1);
   };
-
   const handleStatusUpdate = async (orderId, newStatus) => {
     try {
       await updateOrderStatus(orderId, newStatus, token);
@@ -77,6 +77,28 @@ const Orders = () => {
     } catch (error) {
       console.error('Error updating delivery date:', error);
       toast.error('Failed to update delivery date');
+    }
+  };
+
+  const handleCancelOrder = async (orderId) => {
+    try {
+      const confirmMsg = 'Are you sure you want to cancel this order? Items not yet delivered will be cancelled.';
+      if (!window.confirm(confirmMsg)) return;
+
+      await cancelOrder(orderId, token);
+
+      // Update local state: mark all rows with this order id as cancelled
+      setOrders(prev => prev.map(o => (
+        (o._id === orderId || o.originalOrderId === orderId)
+          ? { ...o, status: 'cancelled', item: { ...o.item, status: 'cancelled' } }
+          : o
+      )));
+
+      toast.success('Order cancelled successfully');
+    } catch (error) {
+      console.error('Error cancelling order:', error);
+      const msg = error?.response?.data?.message || 'Failed to cancel order';
+      toast.error(msg);
     }
   };
 
@@ -130,9 +152,7 @@ const Orders = () => {
                 <th className="py-2 px-4 text-left">Status</th>
                 <th className="py-2 px-4 text-left">Order Date</th>
                 <th className="py-2 px-4 text-left">Expected Delivery</th>
-                {(isSellerRoute || user?.role === 'seller') && (
-                  <th className="py-2 px-4 text-left">Actions</th>
-                )}
+                <th className="py-2 px-4 text-left">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -197,8 +217,8 @@ const Orders = () => {
                       <span className="text-gray-400">Not set</span>
                     )}
                   </td>
-                  {(isSellerRoute || user?.role === 'seller') && (
-                    <td className="py-2 px-4">
+                  <td className="py-2 px-4">
+                    {isSellerRoute || user?.role === 'seller' ? (
                       <div className="flex flex-col gap-2">
                         <select
                           value={order.status}
@@ -220,8 +240,19 @@ const Orders = () => {
                           min={new Date().toISOString().slice(0, 16)}
                         />
                       </div>
-                    </td>
-                  )}
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <button
+                          disabled={['delivered', 'cancelled'].includes((order.status || '').toLowerCase())}
+                          onClick={() => handleCancelOrder(order.originalOrderId || order._id)}
+                          className={`text-xs px-3 py-1 rounded border ${['delivered', 'cancelled'].includes((order.status || '').toLowerCase()) ? 'cursor-not-allowed text-gray-400 border-gray-200' : 'text-red-600 border-red-300 hover:bg-red-50'}`}
+                          title={['delivered', 'cancelled'].includes((order.status || '').toLowerCase()) ? 'Cannot cancel delivered or already cancelled orders' : 'Cancel this order'}
+                        >
+                          Cancel Order
+                        </button>
+                      </div>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

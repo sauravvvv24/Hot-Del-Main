@@ -88,7 +88,7 @@ const Billing = () => {
   };
 
   const calculateTax = () => {
-    return calculateTotal() * 0.18; // 18% GST
+    return calculateTotal() * 0.05; // 5% GST
   };
 
   const calculateFinalTotal = () => {
@@ -445,7 +445,7 @@ const Billing = () => {
                 <span>₹{calculateTotal().toFixed(2)}</span>
               </div>
               <div className="flex justify-between">
-                <span>Tax (18% GST):</span>
+                <span>Tax (5% GST):</span>
                 <span>₹{calculateTax().toFixed(2)}</span>
               </div>
               <div className="flex justify-between text-lg font-bold border-t border-gray-200 pt-2">

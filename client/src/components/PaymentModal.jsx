@@ -96,7 +96,7 @@ const PaymentModal = ({ isOpen, onClose, order, onSuccess, onFailure }) => {
               <span className="font-medium">₹{order.subtotal?.toFixed(2)}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-600">GST (18%):</span>
+              <span className="text-gray-600">GST (5%):</span>
               <span className="font-medium">₹{order.gstAmount?.toFixed(2)}</span>
             </div>
             <div className="flex justify-between text-lg font-bold text-gray-900 pt-2 border-t">

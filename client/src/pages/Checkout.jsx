@@ -34,7 +34,7 @@ const Checkout = () => {
 
   const calculateTotals = () => {
     const subtotal = getTotal();
-    const gstAmount = subtotal * 0.18; // 18% GST
+    const gstAmount = subtotal * 0.05; // 5% GST
     const total = subtotal + gstAmount;
     
     return { subtotal, gstAmount, total };
@@ -182,7 +182,7 @@ const Checkout = () => {
                 <span>₹{calculateTotals().subtotal.toFixed(2)}</span>
               </div>
               <div className="flex justify-between text-sm text-gray-600">
-                <span>GST (18%)</span>
+                <span>GST (5%)</span>
                 <span>₹{calculateTotals().gstAmount.toFixed(2)}</span>
               </div>
               <div className="flex justify-between font-bold text-lg text-gray-900 border-t pt-2">
