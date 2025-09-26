@@ -169,8 +169,8 @@ export const generateInvoice = async (req, res) => {
        .text(`₹${order.subtotal?.toFixed(2) || subtotal.toFixed(2)}`, 450, totalsTop);
     
     // GST
-    const gstAmount = order.gstAmount || order.tax || (subtotal * 0.18);
-    doc.text('GST (18%):', 350, totalsTop + 20)
+    const gstAmount = order.gstAmount || order.tax || (subtotal * 0.05);
+    doc.text('GST (5%):', 350, totalsTop + 20)
        .text(`₹${gstAmount.toFixed(2)}`, 450, totalsTop + 20);
     
     // Total

@@ -74,7 +74,7 @@ export const placeOrder = async (req, res) => {
 
     // Calculate amounts if not provided
     const calculatedSubtotal = subtotal || orderItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-    const calculatedGstAmount = gstAmount || (calculatedSubtotal * 0.18); // 18% GST
+    const calculatedGstAmount = gstAmount || (calculatedSubtotal * 0.05); // 5% GST
     const calculatedTotal = totalAmount || total || (calculatedSubtotal + calculatedGstAmount);
 
     // Create and save the order
@@ -107,6 +107,86 @@ export const placeOrder = async (req, res) => {
   } catch (error) {
     console.error('Place order error:', error);
     res.status(500).json({ message: 'Order failed', error: error.message });
+  }
+};
+
+// Allow a hotel user to cancel their own order
+export const cancelOrderByHotel = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const actingUser = req.user; // Could be a Hotel or User document
+
+    // Ensure only hotels can cancel their orders
+    if (!actingUser || actingUser.role !== 'hotel') {
+      return res.status(403).json({ message: 'Only hotel accounts can cancel orders' });
+    }
+
+    const order = await Order.findById(orderId);
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    // Verify the order belongs to this hotel
+    if (order.hotelId.toString() !== (actingUser.id || actingUser._id).toString()) {
+      return res.status(403).json({ message: 'You are not authorized to cancel this order' });
+    }
+
+    // If order already delivered in full, or already cancelled, prevent cancellation
+    if (order.status === 'delivered') {
+      return res.status(400).json({ message: 'Delivered orders cannot be cancelled' });
+    }
+    if (order.status === 'cancelled') {
+      return res.status(400).json({ message: 'Order is already cancelled' });
+    }
+
+    // Determine which items can be cancelled and restore inventory for them
+    const cancellableItems = [];
+    let hasUndeliverableItems = false; // tracks if some items are already delivered
+
+    order.items.forEach(item => {
+      if (item.status === 'delivered') {
+        hasUndeliverableItems = true;
+        return; // skip delivered items
+      }
+      if (item.status !== 'cancelled') {
+        cancellableItems.push({ productId: item.productId, quantity: item.quantity });
+        item.status = 'cancelled';
+      }
+    });
+
+    // If nothing to cancel
+    if (cancellableItems.length === 0) {
+      return res.status(400).json({ message: 'No cancellable items found for this order' });
+    }
+
+    // Restore inventory for cancelled items
+    await restoreInventory(cancellableItems);
+
+    // Update order level status: if all items cancelled -> cancelled, else keep as is
+    const anyActive = order.items.some(i => i.status !== 'cancelled');
+    order.status = anyActive ? order.status : 'cancelled';
+
+    // Optional: if payment was made online, mark as refund pending/handled
+    if (order.paymentMethod === 'online' && order.paymentStatus === 'paid') {
+      // Without payment gateway integration here, mark as refunded to keep simple
+      order.paymentStatus = 'refunded';
+    }
+
+    await order.save();
+
+    const populatedOrder = await Order.findById(orderId)
+      .populate('items.productId')
+      .populate('items.sellerId')
+      .populate('hotelId');
+
+    const message = hasUndeliverableItems
+      ? 'Order partially cancelled. Delivered items were not affected.'
+      : 'Order cancelled successfully';
+
+    return res.status(200).json({ message, order: populatedOrder });
+  } catch (err) {
+    console.error('Cancel order by hotel error:', err);
+    return res.status(500).json({ message: 'Failed to cancel order' });
   }
 };
 
@@ -346,7 +426,7 @@ export const updateOrderStatus = async (req, res) => {
 };
 
 // Helper function to restore inventory when orders are cancelled
-const restoreInventory = async (cancelledItems) => {
+async function restoreInventory(cancelledItems) {
   for (const item of cancelledItems) {
     try {
       await Product.findByIdAndUpdate(
@@ -361,7 +441,7 @@ const restoreInventory = async (cancelledItems) => {
       console.error('Failed to restore inventory for item:', item.productId, restoreError);
     }
   }
-};
+}
 
 // Get a single order by ID
 export const getOrderById = async (req, res) => {

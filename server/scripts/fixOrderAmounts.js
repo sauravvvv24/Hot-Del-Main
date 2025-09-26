@@ -24,7 +24,7 @@ const fixOrderAmounts = async () => {
     console.log(`Found ${ordersToFix.length} orders to fix`);
 
     for (const order of ordersToFix) {
-      const calculatedGstAmount = order.subtotal * 0.18;
+      const calculatedGstAmount = order.subtotal * 0.05;
       const calculatedTotal = order.subtotal + calculatedGstAmount;
 
       await Order.findByIdAndUpdate(order._id, {

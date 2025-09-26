@@ -32,7 +32,7 @@ export const processMockPayment = async (req, res) => {
 
     // Calculate GST and total if they're missing or zero
     if (!order.gstAmount || order.gstAmount === 0) {
-      const calculatedGstAmount = order.subtotal * 0.18;
+      const calculatedGstAmount = order.subtotal * 0.05;
       const calculatedTotal = order.subtotal + calculatedGstAmount;
       
       updateData.gstAmount = calculatedGstAmount;
