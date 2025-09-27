@@ -91,7 +91,10 @@ const SellerDashboard = () => {
           const ordersData = ordersRes.data || [];
           setOrders(ordersData);
           
-          const totalRevenue = ordersData.reduce((sum, order) => sum + (order.totalAmount || 0), 0);
+          // Exclude cancelled items from revenue
+          const totalRevenue = ordersData
+            .filter(order => (order.status || '').toLowerCase() !== 'cancelled')
+            .reduce((sum, order) => sum + (order.totalAmount || 0), 0);
           setStats(prev => ({
             ...prev,
             totalOrders: ordersData.length,

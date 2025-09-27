@@ -1,6 +1,15 @@
-// controllers/orderController.js
+// Code Edit:
 import Order from '../models/Order.js';
 import Cart from '../models/Cart.js';
+import {
+  isCancellationAllowed,
+  sendCODCancellationWithin24Hours,
+  sendCODCancellationAfter24Hours,
+  sendOnlinePaymentCancellationWithin24Hours,
+  sendOnlinePaymentCancellationAfter24Hours,
+  sendCODSellerCancellation,
+  sendOnlinePaymentSellerCancellation
+} from '../services/refundService.js';
 import Product from '../models/Product.js';
 import HotelModel from '../models/Hotel.js';
 
@@ -113,31 +122,59 @@ export const placeOrder = async (req, res) => {
 // Allow a hotel user to cancel their own order
 export const cancelOrderByHotel = async (req, res) => {
   try {
+    console.log('=== HOTEL CANCELLATION REQUEST (ORDER CONTROLLER) ===');
     const { orderId } = req.params;
     const actingUser = req.user; // Could be a Hotel or User document
+    console.log('Order ID:', orderId);
+    console.log('Acting User:', actingUser);
 
     // Ensure only hotels can cancel their orders
-    if (!actingUser || actingUser.role !== 'hotel') {
+    // Check both 'role' (for User model) and 'type' (for Hotel model)
+    const isHotel = actingUser && (actingUser.role === 'hotel' || actingUser.type);
+    if (!isHotel) {
+      console.log('Access denied: Not a hotel user. User:', actingUser);
       return res.status(403).json({ message: 'Only hotel accounts can cancel orders' });
     }
+    console.log('Access granted: Hotel user verified');
 
-    const order = await Order.findById(orderId);
+    const order = await Order.findById(orderId).populate('hotelId');
+    console.log('Order found:', !!order);
+    
     if (!order) {
+      console.log('Order not found in database');
       return res.status(404).json({ message: 'Order not found' });
     }
+    
+    console.log('Order details:', {
+      id: order._id,
+      status: order.status,
+      paymentMethod: order.paymentMethod,
+      billingEmail: order.billingInfo?.email,
+      orderedAt: order.orderedAt
+    });
 
     // Verify the order belongs to this hotel
-    if (order.hotelId.toString() !== (actingUser.id || actingUser._id).toString()) {
+    console.log('Verifying order ownership...');
+    console.log('Order hotelId:', order.hotelId._id.toString());
+    console.log('Acting user ID:', (actingUser.id || actingUser._id).toString());
+    
+    if (order.hotelId._id.toString() !== (actingUser.id || actingUser._id).toString()) {
+      console.log('Order ownership verification failed');
       return res.status(403).json({ message: 'You are not authorized to cancel this order' });
     }
+    console.log('Order ownership verified successfully');
 
     // If order already delivered in full, or already cancelled, prevent cancellation
+    console.log('Checking order status for cancellation eligibility...');
     if (order.status === 'delivered') {
+      console.log('Order already delivered - cannot cancel');
       return res.status(400).json({ message: 'Delivered orders cannot be cancelled' });
     }
     if (order.status === 'cancelled') {
+      console.log('Order already cancelled');
       return res.status(400).json({ message: 'Order is already cancelled' });
     }
+    console.log('Order status check passed - proceeding with cancellation');
 
     // Determine which items can be cancelled and restore inventory for them
     const cancellableItems = [];
@@ -156,23 +193,82 @@ export const cancelOrderByHotel = async (req, res) => {
 
     // If nothing to cancel
     if (cancellableItems.length === 0) {
-      return res.status(400).json({ message: 'No cancellable items found for this order' });
     }
 
     // Restore inventory for cancelled items
     await restoreInventory(cancellableItems);
 
+    // IMPORTANT: Save original total amount BEFORE recalculating (for email)
+    const originalTotalAmount = order.totalAmount;
+    console.log('Original total amount before recalc:', originalTotalAmount);
+
     // Update order level status: if all items cancelled -> cancelled, else keep as is
     const anyActive = order.items.some(i => i.status !== 'cancelled');
     order.status = anyActive ? order.status : 'cancelled';
 
-    // Optional: if payment was made online, mark as refund pending/handled
-    if (order.paymentMethod === 'online' && order.paymentStatus === 'paid') {
-      // Without payment gateway integration here, mark as refunded to keep simple
-      order.paymentStatus = 'refunded';
+    // Update cancellation tracking fields
+    if (order.status === 'cancelled') {
+      order.cancelledAt = new Date();
+      order.cancelledBy = 'hotel';
+      order.cancellationReason = 'Cancelled by hotel within 24 hours';
     }
 
+    // Optional: if payment was made online, mark as refund pending/handled
+    if (order.paymentMethod === 'online' && order.paymentStatus === 'paid') {
+      order.paymentStatus = 'refunded';
+      order.refundStatus = 'pending';
+      order.refundAmount = originalTotalAmount; // Use original amount
+    } else if (order.paymentMethod === 'cod') {
+      order.refundStatus = 'not_applicable';
+    }
+
+    // Recalculate order totals after cancellation so revenue reflects changes
+    recalcOrderTotals(order);
+    
+    // Restore original amount for email (after recalc sets it to 0)
+    const emailTotalAmount = originalTotalAmount;
+    console.log('Total amount for email:', emailTotalAmount);
+
     await order.save();
+
+    // Send cancellation email based on refund policy
+    let emailResult = { success: false };
+    console.log(`Sending cancellation email for order ${order._id}, payment method: ${order.paymentMethod}, email: ${order.billingInfo?.email}`);
+    console.log('Order totalAmount before email:', order.totalAmount);
+    console.log('Order object type:', typeof order);
+    console.log('Order toObject totalAmount:', order.toObject ? order.toObject().totalAmount : 'No toObject method');
+    
+    try {
+      // Check if cancellation is within policy (24 hours)
+      const cancellationCheck = isCancellationAllowed(order, 'hotel');
+      console.log('Cancellation check result:', cancellationCheck);
+      
+      // Create order object with original amount for email
+      const orderForEmail = {
+        ...order.toObject(),
+        totalAmount: emailTotalAmount
+      };
+      
+      if (cancellationCheck.allowed) {
+        // Within 24 hours - send confirmation email
+        if (order.paymentMethod === 'cod') {
+          emailResult = await sendCODCancellationWithin24Hours(orderForEmail);
+        } else if (order.paymentMethod === 'online') {
+          emailResult = await sendOnlinePaymentCancellationWithin24Hours(orderForEmail);
+        }
+      } else {
+        // After 24 hours - send rejection email (but still cancel for now)
+        if (order.paymentMethod === 'cod') {
+          emailResult = await sendCODCancellationAfter24Hours(orderForEmail);
+        } else if (order.paymentMethod === 'online') {
+          emailResult = await sendOnlinePaymentCancellationAfter24Hours(orderForEmail);
+        }
+      }
+      console.log('Email result:', emailResult);
+    } catch (emailError) {
+      console.error('Error sending cancellation email:', emailError);
+      emailResult = { success: false, error: emailError.message };
+    }
 
     const populatedOrder = await Order.findById(orderId)
       .populate('items.productId')
@@ -183,7 +279,14 @@ export const cancelOrderByHotel = async (req, res) => {
       ? 'Order partially cancelled. Delivered items were not affected.'
       : 'Order cancelled successfully';
 
-    return res.status(200).json({ message, order: populatedOrder });
+    return res.status(200).json({ 
+      message, 
+      order: populatedOrder,
+      emailSent: emailResult.success,
+      refundInfo: order.paymentMethod === 'online' ? 
+        'Refund will be processed according to our policy' : 
+        order.paymentMethod === 'cod' ? 'No payment was processed for this COD order' : null
+    });
   } catch (err) {
     console.error('Cancel order by hotel error:', err);
     return res.status(500).json({ message: 'Failed to cancel order' });
@@ -217,9 +320,10 @@ export const getOrdersByHotel = async (req, res) => {
     const orders = await Order.find({ 
       hotelId,
       $or: [
-        { paymentStatus: 'paid' },                           // Successful online payments
+        { paymentStatus: { $in: ['paid', 'refunded'] } },   // Online payments (paid or refunded)
         { paymentMethod: 'credit' },                         // Credit orders (any payment status)
-        { paymentMethod: 'cod' }                             // Cash on Delivery orders (any payment status)
+        { paymentMethod: 'cod' },                            // Cash on Delivery orders (any payment status)
+        { status: 'cancelled' }                              // Always include cancelled orders
       ]
     })
       .populate('items.productId', 'name brand category price image')
@@ -300,9 +404,10 @@ export const getOrdersBySeller = async (req, res) => {
     const orders = await Order.find({ 
       'items.sellerId': sellerId,
       $or: [
-        { paymentStatus: 'paid' },                           // Successful online payments
+        { paymentStatus: { $in: ['paid', 'refunded'] } },   // Online payments (paid or refunded)
         { paymentMethod: 'credit' },                         // Credit orders (any payment status)
-        { paymentMethod: 'cod' }                             // Cash on Delivery orders (any payment status)
+        { paymentMethod: 'cod' },                            // Cash on Delivery orders (any payment status)
+        { status: 'cancelled' }                              // Always include cancelled orders
       ]
     })
       .populate('items.productId', 'name brand category price image')
@@ -411,6 +516,57 @@ export const updateOrderStatus = async (req, res) => {
       await restoreInventory(cancelledItems);
     }
 
+    // IMPORTANT: Save original total amount BEFORE recalculating (for email)
+    const originalTotalAmount = order.totalAmount;
+    
+    // Send seller cancellation email if items were cancelled
+    let emailResult = { success: false };
+    if (cancelledItems.length > 0 && status === 'cancelled') {
+      console.log('=== SELLER CANCELLATION EMAIL ===');
+      console.log('Order ID:', orderId);
+      console.log('Seller ID:', sellerId);
+      console.log('Original total amount:', originalTotalAmount);
+      console.log('Payment method:', order.paymentMethod);
+      console.log('Billing email:', order.billingInfo?.email);
+      
+      try {
+        // Update cancellation tracking fields
+        order.cancelledAt = new Date();
+        order.cancelledBy = 'seller';
+        order.cancellationReason = 'Cancelled by seller due to unforeseen circumstances';
+        
+        // Update refund status
+        if (order.paymentMethod === 'online' && order.paymentStatus === 'paid') {
+          order.paymentStatus = 'refunded';
+          order.refundStatus = 'pending';
+          order.refundAmount = originalTotalAmount;
+        } else if (order.paymentMethod === 'cod') {
+          order.refundStatus = 'not_applicable';
+        }
+
+        // Create order object with original amount for email
+        const orderForEmail = {
+          ...order.toObject(),
+          totalAmount: originalTotalAmount
+        };
+
+        // Send appropriate seller cancellation email
+        if (order.paymentMethod === 'cod') {
+          emailResult = await sendCODSellerCancellation(orderForEmail);
+        } else if (order.paymentMethod === 'online') {
+          emailResult = await sendOnlinePaymentSellerCancellation(orderForEmail);
+        }
+        
+        console.log('Seller cancellation email result:', emailResult);
+      } catch (emailError) {
+        console.error('Error sending seller cancellation email:', emailError);
+        emailResult = { success: false, error: emailError.message };
+      }
+    }
+
+    // Recalculate order totals after potential cancellations so revenue reflects changes
+    recalcOrderTotals(order);
+
     await order.save();
     
     const populatedOrder = await Order.findById(orderId)
@@ -418,7 +574,13 @@ export const updateOrderStatus = async (req, res) => {
       .populate('items.sellerId')
       .populate('hotelId');
 
-    res.status(200).json({ message: 'Order updated successfully', order: populatedOrder });
+    res.status(200).json({ 
+      message: 'Order updated successfully', 
+      order: populatedOrder,
+      emailSent: emailResult.success,
+      cancellationEmail: cancelledItems.length > 0 && status === 'cancelled' ? 
+        (emailResult.success ? 'Cancellation email sent to customer' : 'Email sending failed') : null
+    });
   } catch (err) {
     console.error('Update order status error:', err);
     res.status(500).json({ message: 'Failed to update order status' });
@@ -440,6 +602,31 @@ async function restoreInventory(cancelledItems) {
     } catch (restoreError) {
       console.error('Failed to restore inventory for item:', item.productId, restoreError);
     }
+  }
+}
+
+// Recalculate order-level totals (subtotal, gstAmount, totalAmount)
+// Excludes items with status 'cancelled' from totals to ensure revenue reflects cancellations
+function recalcOrderTotals(orderDoc) {
+  try {
+    const GST_RATE = 0.05; // keep in sync with placeOrder
+    const activeItems = (orderDoc.items || []).filter(i => i.status !== 'cancelled');
+    const newSubtotal = activeItems.reduce((sum, i) => sum + (Number(i.price || 0) * Number(i.quantity || 0)), 0);
+    const newGst = Number((newSubtotal * GST_RATE).toFixed(2));
+    const newTotal = Number((newSubtotal + newGst).toFixed(2));
+
+    orderDoc.subtotal = newSubtotal;
+    orderDoc.gstAmount = newGst;
+    // keep backward compatibility
+    orderDoc.tax = newGst;
+    orderDoc.totalAmount = newTotal;
+
+    // If everything is cancelled, mark order as cancelled
+    if (activeItems.length === 0) {
+      orderDoc.status = 'cancelled';
+    }
+  } catch (e) {
+    console.error('Failed to recalc order totals:', e);
   }
 }
 

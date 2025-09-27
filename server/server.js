@@ -15,6 +15,7 @@ import otpRoutes from './routes/otpRoutes.js';
 import paymentRoutes from './routes/paymentRoutes.js';
 import invoiceRoutes from './routes/invoiceRoutes.js';
 import wishlistRoutes from './routes/wishlistRoutes.js';
+import refundRoutes from './routes/refundRoutes.js';
 
 dotenv.config();
 
@@ -46,6 +47,7 @@ app.use('/api/otp', otpRoutes);               // OTP verification routes
 app.use('/api/payment', paymentRoutes);       // Payment processing routes
 app.use('/api/invoice', invoiceRoutes);       // Invoice generation routes
 app.use('/api/wishlist', wishlistRoutes);     // Wishlist functionality
+app.use('/api/refund', refundRoutes);         // Refund and cancellation routes
 
 // Root Route
 app.get('/', (req, res) => {

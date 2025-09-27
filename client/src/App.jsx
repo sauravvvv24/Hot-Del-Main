@@ -32,6 +32,7 @@ import PaymentSuccess from './pages/PaymentSuccess';
 import PaymentFailure from './pages/PaymentFailure';
 import Billing from './pages/Billing';
 import Wishlist from './pages/Wishlist';
+import TestCancellation from './pages/TestCancellation';
 
 const App = () => {
   return (
@@ -83,6 +84,9 @@ const App = () => {
           {/* Payment Routes */}
           <Route path="/payment-success/:orderId" element={<PrivateRoute allowedRoles={['hotel']}><PaymentSuccess /></PrivateRoute>} />
           <Route path="/payment-failure/:orderId" element={<PrivateRoute allowedRoles={['hotel']}><PaymentFailure /></PrivateRoute>} />
+          
+          {/* Test Routes */}
+          <Route path="/test-cancellation" element={<TestCancellation />} />
 
           {/* Admin Panel */}
           <Route path="/admin" element={<PrivateRoute allowedRoles={['admin']}><AdminPanel /></PrivateRoute>} />

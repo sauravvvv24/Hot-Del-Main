@@ -23,7 +23,8 @@ import {
   Filter, 
   DollarSign,
   Truck,
-  Search
+  Search,
+  XCircle
 } from 'lucide-react';
 import BackButton from '../components/BackButton';
 

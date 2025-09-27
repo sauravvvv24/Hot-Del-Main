@@ -172,6 +172,39 @@ const orderSchema = new mongoose.Schema({
   orderedAt: {
     type: Date,
     default: Date.now
+  },
+  
+  // Cancellation Details
+  cancelledAt: {
+    type: Date,
+    default: null
+  },
+  
+  cancelledBy: {
+    type: String,
+    enum: ['hotel', 'seller', 'admin'],
+    default: null
+  },
+  
+  cancellationReason: {
+    type: String,
+    default: null
+  },
+  
+  refundStatus: {
+    type: String,
+    enum: ['not_applicable', 'pending', 'processed', 'failed'],
+    default: 'not_applicable'
+  },
+  
+  refundAmount: {
+    type: Number,
+    default: 0
+  },
+  
+  refundProcessedAt: {
+    type: Date,
+    default: null
   }
 }, {
   timestamps: true
