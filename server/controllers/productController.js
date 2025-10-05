@@ -276,7 +276,8 @@ export const deleteProduct = async (req, res) => {
 export const getMyProducts = async (req, res) => {
   try {
     const products = await Product.find({ 
-      seller: req.user.id
+      seller: req.user.id,
+      isActive: true
     }).sort({ createdAt: -1 });
 
     console.log('Fetching products for seller:', req.user.id);
